@@ -3,7 +3,7 @@ Scripts/code for interacting with OSM - Online Scout Manager
 
 ## Risk Assessments
 
-[add_risk_assessment.py](./add_risk_assessment.py) requires an Excel sheet called risk_assessment.xlsx in the same path with the following column headers (with example risk).
+[add_risk_assessment.py](./add_risk_assessment.py) requires an Excel sheet called risk_assessment.xlsx with a sheet per "Category" (OSM term) in the same path with each sheet having the following column headers (with example risk).
 
 |Hazard|Who|Controls|Check|
 |---|---|---|---|
