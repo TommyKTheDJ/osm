@@ -12,6 +12,7 @@ Scripts/code for interacting with OSM - Online Scout Manager
 To run this you need to create an OAuth application in OSM (Settings > My Account Details > Developer Tools > OAuth) and then paste the values for the `client_id` and `client_secret` into the script.
 
 Also, you will need to add your own `section_id` value.
+
 You can get this by using developer tools in your browser and viewing the request headers when you're clicking around.
 Alternatively you can try this API call: https://documenter.getpostman.com/view/66995/online-scout-manager/RW1emdfP#99c5fe13-8877-7308-c2fb-897f0436b908
 
