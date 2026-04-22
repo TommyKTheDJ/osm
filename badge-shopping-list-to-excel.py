@@ -33,7 +33,8 @@ def extract_tables_from_pdf(pdf_path, output_excel_path):
 
 
 # Example usage:
-pdf_path = "/Users/tom.kivlin/Downloads/Badge Shopping List.pdf"  # Path to your PDF file
+# Path to your PDF file
+pdf_path = "/Users/tom.kivlin/Downloads/Badge Shopping List wrde feb25.pdf"
 # Path to save the Excel file
-output_excel_path = "/Users/tom.kivlin/Downloads/Badge Shopping List.xlsx"
+output_excel_path = "/Users/tom.kivlin/Downloads/Badge Shopping List wrde feb25.xlsx"
 extract_tables_from_pdf(pdf_path, output_excel_path)

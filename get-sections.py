@@ -1,101 +1,138 @@
+#! /usr/bin/env python3
+
+import json
 import requests
 import logging
-import pprint
+import time
+from datetime import date
+from oauthlib.oauth2 import BackendApplicationClient
+from requests_oauthlib import OAuth2Session
 
 log_level = "WARNING"
 logging.basicConfig(level=log_level)
-pp = pprint.PrettyPrinter(indent=4)
 
 token_url = 'https://www.onlinescoutmanager.co.uk/oauth/token'
 api_url = 'https://www.onlinescoutmanager.co.uk/api.php'
 
-# Replace these with your actual client credentials and token URL
-client_id = ''
-client_secret = ''
+# Read credentials from .credentials file
+credentials = {}
+with open('.credentials', 'r') as f:
+    for line in f:
+        line = line.strip()
+        if '=' in line:
+            key, value = line.split('=', 1)
+            credentials[key.strip()] = value.strip()
+
+client_id = credentials.get('client_id', '')
+client_secret = credentials.get('secret', '')
+
+# Load section name mappings
+with open('sections.json', 'r') as f:
+    sections_config = json.load(f)
+    section_names = sections_config['sections']
+    excluded_sections = set(sections_config.get('exclude', []))
 
 
 def get_access_token(client_id, client_secret, token_url):
-    # Set up the OAuth 2.0 token request data
-    token_data = {
-        'grant_type': 'client_credentials',
-        'scope': 'section:programme:write',
-        'client_id': client_id,
-        'client_secret': client_secret
-    }
-
     try:
-        # Send a POST request to the token endpoint to get the access token
-        response = requests.post(token_url, data=token_data)
+        oauth_client = BackendApplicationClient(client_id=client_id)
+        oauth = OAuth2Session(client=oauth_client)
+        token = oauth.fetch_token(
+            token_url=token_url,
+            client_id=client_id,
+            client_secret=client_secret,
+            scope='section:badge:read',
+        )
+        logging.info(f"Token obtained, expires in {token.get('expires_in')}s")
+        return token.get('access_token')
+    except Exception as e:
+        logging.error(f"Failed to obtain token: {e}")
+        return None
 
-        # Check if the request was successful
+
+def make_api_call(url, headers, data=None):
+    """Make an API call with rate limit handling."""
+    try:
+        response = requests.post(url, headers=headers, data=data)
         response.raise_for_status()
 
-        # Parse the response JSON to get the access token
-        access_token = response.json().get('access_token')
-        return access_token
+        ratelimit_remaining = int(response.headers.get('X-RateLimit-Remaining', 999))
+        ratelimit_reset = int(response.headers.get('X-RateLimit-Reset', 0))
+        logging.info(f"API requests remaining: {ratelimit_remaining}")
+
+        if ratelimit_remaining < 100:
+            logging.warning(f"Close to rate limit - pausing for {ratelimit_reset}s")
+            time.sleep(ratelimit_reset)
+
+        if response.status_code == 429:
+            delay = int(response.headers.get('Retry-After', 60))
+            logging.warning(f"Rate limited. Retrying in {delay}s")
+            time.sleep(delay)
+            return make_api_call(url, headers, data)
+
+        return response.json()
 
     except requests.exceptions.RequestException as e:
         logging.error(e)
         return None
+
+
+def find_current_term(terms):
+    """Find the term that covers today's date."""
+    today = date.today().isoformat()
+    for term in terms:
+        if term.get('startdate', '') <= today <= term.get('enddate', ''):
+            return term
+    # If no exact match, return the latest term
+    if terms:
+        return terms[-1]
+    return None
 
 
 def get_sections(access_token):
+    """Fetch section config and display section ID, type, and current term."""
     headers = {
-        'Authorization': f'Bearer {access_token}',  # Include the access token in the Authorization header
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/x-www-form-urlencoded',
     }
-    request_url = f"{api_url}?action=getSectionConfig"
-    try:
-        # Send a POST request to the API endpoint with the access token in the headers
-        response = requests.post(request_url, headers=headers)
 
-        # Check if the request was successful
-        response.raise_for_status()
+    result = make_api_call(f"{api_url}?action=getSectionConfig", headers)
+    if result is None:
+        logging.error("Failed to get section config")
+        return
 
-        # Process the API response
-        data = response.json()
-        logging.debug(data)
-        pp.pprint(data)
+    terms_result = make_api_call(f"{api_url}?action=getTerms", headers)
 
-        ## OSM docs on rate limits suggest:
-        # Please monitor the standard rate limit headers to ensure your application does not get blocked automatically. Applications that are frequently blocked will be permanently blocked.
-        # X-RateLimit-Limit - this is the number of requests per hour that your API can perform (per authenticated user)
-        # X-RateLimit-Remaining - this is the number of requests remaining that the current user can perform before they are blocked
-        # X-RateLimit-Reset - this is the number of seconds until the rate limit for the current user resets back to your overall limit
-        # An HTTP 429 status code will be sent if the user goes over the limit, along with a Retry-After header with the number of seconds until you can use the API again.
-        # Please also enforce your own lower rate limits, especially if you are allowing unauthenticated users to manipulate your data (e.g. allowing members to join a waiting list).
+    # Build terms lookup by section_id
+    terms_by_section = {}
+    if isinstance(terms_result, dict):
+        terms_by_section = terms_result
 
-        ratelimit_remaining = int(response.headers['X-RateLimit-Remaining'])
-        logging.info(f"Number of API requests remaining: {ratelimit_remaining}")
-        ratelimit_reset = int(response.headers['X-RateLimit-Reset'])
-        logging.info(f"Time until number of remaining requests resets: {ratelimit_reset}")
+    print(f"{'ID':<8} {'Name':<20} {'Type':<10} {'Current Term':<25} {'Term ID':<10} {'Dates'}")
+    print("-" * 100)
 
-        if ratelimit_remaining < 100:
-            logging.info(f"Close to rate limit - pausing for {ratelimit_reset}")
-            time.sleep(delay)
-            # Once delayed, retry the API call
-            return make_api_call(url, headers, data)
+    for section_id, config in result.items():
+        if not isinstance(config, dict):
+            continue
 
-        # If the response code is 429, wait for the specified time (this shouldn't happen if the above code is working as expected)
-        if response.status_code == 429:
-            if 'Retry-After' in response.headers:
-                delay = int(response.headers['Retry-After'])
-                logging.info(f"Rate limited. Retrying in {delay} seconds")
-                time.sleep(delay)
-                # Once delayed, retry the API call
-                return make_api_call(url, headers, data)
+        name = section_names.get(section_id, '?')
+        section_type = config.get('section_type', config.get('sectionType', '?'))
+        terms = terms_by_section.get(section_id, [])
+        current = find_current_term(terms)
 
-        logging.info(f"Response Status Code: {str(response.status_code)}")
-        for key, value in response.headers.items():
-            if 'X-RateLimit' in key: 
-                logging.info(f"{key}: {value}")
+        if current:
+            term_name = current.get('name', '?')
+            term_id = current.get('termid', '?')
+            dates = f"{current.get('startdate', '?')} to {current.get('enddate', '?')}"
+        else:
+            term_name = 'No terms'
+            term_id = '-'
+            dates = '-'
 
-    except requests.exceptions.RequestException as e:
-        logging.error(e)
-        return None
+        print(f"{section_id:<8} {name:<20} {section_type:<10} {term_name:<25} {term_id:<10} {dates}")
 
 
-# Get the access token
+# Main
 access_token = get_access_token(client_id, client_secret, token_url)
 
 if access_token:
