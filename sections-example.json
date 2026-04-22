@@ -1,0 +1,10 @@
+{
+    "sections": {
+        "1234": "Beavers",
+        "5678": "Cubs",
+        "9101": "Scouts",
+        "1111": "All Young People",
+        "1112": "All Adults"
+    },
+    "exclude": ["1111", "1112"]
+}
